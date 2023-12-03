@@ -1,169 +1,148 @@
 package Interpretator;
 
 import java.io.BufferedReader;
+import java.io.FileNotFoundException;
 import java.io.FileReader;
-import java.io.IOException;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Stream;
 
 public class ScriptInterpreter {
+
     private Map<String, Integer> variables;
 
     public ScriptInterpreter() {
         variables = new HashMap<>();
     }
 
-    private double eval(final String str){
-        return new Object(){
-            int pos = -1, ch;
-
-            void nextChar(){
-                ch = (++pos < str.length()) ? str.charAt(pos) : -1;
-            }
-            boolean eat(int charToEat){
-                while (ch == ' ') nextChar();{
-                    if (ch == charToEat){
-                        nextChar();
-                        return true;
-                    }
-                    return false;
-                }
-            }
-
-            double parseFactor(){
-                if (eat('+')) return parseFactor();
-                if (eat('-')) return -parseFactor();
-
-                double x;
-                int startPos = this.pos;
-                if (eat('(')){
-                    x=parseExpression();
-                    eat(')');
-                } else if ((ch >= '0' && ch <= '9') || ch == '_') {
-                    while ((ch >= '0' && ch <= '9') || ch == '-')  nextChar();
-                        x = Double.parseDouble(str.substring(startPos, this.pos));
-                    }else {
-                        throw new RuntimeException("Некорректное выражение" + str);
-                    }
-                    return x;
-                }
-
-
-            double parseTerm(){
-                double x = parseFactor();
-                    for (; ;){
-                        if (eat('*')) {
-                            x *= parseFactor();
-                        } else if (eat('/')){
-                            x/= parseFactor();
-                        } else {
-                            return x;
-                        }
-                    }
-
-                }
-
-            double parseExpression(){
-                double x = parseTerm();
-                for (;;){
-                    if (eat('+')){
-                        x+=parseTerm();
-                    } else if (eat('-')) {
-                        x-=parseTerm();
-                    }else {
-                        return x;
-                    }
-                }
-            }
-
-            double parse(){
-                nextChar();
-                double x = parseExpression();
-                if (pos < str.length()){
-                    throw new RuntimeException("Некорректное выражение" + str);
-                }
-                return x;
-            }
-
-
-        } .parse();
+    /**
+     * обрабатывает файл
+     * имя файла принимает в качестве параметра
+     */
+    public void interpreterScript(String filename){
+        BufferedReader bufferedReader = null;
+        try {
+            bufferedReader = new BufferedReader(new FileReader(filename));
+            Stream<String> lines = bufferedReader.lines();
+            lines.forEach(this::processLine);
+        } catch (FileNotFoundException e) {
+            System.out.println(e.getMessage());
+        }
 
     }
 
-    private void processSetStatement(String statement){
-        Pattern pattern = Pattern.compile("set\\s+\\$(\\w+)\\s+(.+)");
-        Matcher matcher = pattern.matcher(statement);
-        if (matcher.matches()){
-            String variableName = matcher.group(1);
-            String expression = matcher.group(2);
-            int value = evaluateExpression(expression);
+    /**
+     * обработка скрипта построчно
+     */
+    private void processLine(String line){
+        line = line.trim();
+        if(line.isEmpty() || line.startsWith("#")){
+            return;
+        }
+        if (line.startsWith("set")){
+            processSetStatement(line);
+        } else if (line.startsWith("print")) {
+            processPrintStatement(line);
+        } else {
+            System.out.println("invalid statement:" + line);
+        }
+    }
+
+    /**
+     * обработка оператора set
+     */
+    private void processSetStatement(String line){
+        String[] token = line.split("="); //разделяем на 2 части по =
+        String variableName = token[0].trim().substring(5);
+        String expression = token[1].trim();
+        int value = evaluateExpression(expression); // передача выражения
+        if (value != Integer.MIN_VALUE){
             variables.put(variableName, value);
         } else {
-            System.out.println("Некорректный оператор:" + statement);
+            System.out.println("Invalid SET statement" + line);
         }
     }
 
-    private int evaluateExpression(String expression){
-        expression = expression.replaceAll("\\$(\\w+)", "variables.getOrDefault(\"$1\", 0)");
-        try {
-            return (int)Math.floor(eval(expression));
-        } catch (Exception e){
-            System.err.println("Error" + expression);
-            e.printStackTrace();
-            return 0;
-        }
-    }
 
-    private void processPrintStatement(String statement){
-        Pattern pattern = Pattern.compile("print\\s+(.+)");
-        Matcher matcher = pattern.matcher(statement);
-        if (matcher.matches()){
-            String[] tokens = matcher.group(1).split(",");
-            for (String token : tokens){
-                token = token.trim();
-                if (token.startsWith("\"")&& token.endsWith("\"")){
-                    System.out.println(token.substring(1,token.length()-1));
-                } else if (token.startsWith("$")) {
-                    String variableName = token.substring(1);
-                    if (variables.containsKey(variableName)){
-                        System.out.println(variables.get(variableName));
-                    } else {
-                        System.out.println("Неизвестная переменная: " + token);
-                        return;
-                    }
-                } else {
-                    System.out.println( "Некорректный токен: " + token);
+    /**
+     * обработка оператора print
+     */
+    private void processPrintStatement(String line){
+        String content =  line.substring(6).trim();
+        String[] tokens = content.split(",");
+        StringBuilder sb = new StringBuilder();
+
+        for (String token : tokens){
+            token = token.trim();
+            if (token.startsWith("\"") && token.endsWith("\"")){
+                if(token.contains("$")){
+                    sb.append(token,2,token.length()-2);
+                }else {
+                sb.append(token, 1, token.length()-1);}
+            } else if (token.startsWith("$")) {
+                String variableName = token.substring(1);
+                Integer value = variables.get(variableName);
+                if (value!=null){
+                    sb.append(value);
+                }else {
+                    System.out.println("Unknown variable in print statement " + line);
                     return;
                 }
-                System.out.println(" ");
+            } else {
+                sb.append(token);
             }
-            System.out.println();
-        } else {
-            System.out.println("Некорректный оператор print" + statement);
+            sb.append(" ");
         }
+        System.out.println(sb.toString().trim());
     }
 
-    public void interpreterScript(String fileName) throws IOException {
 
-        BufferedReader reader = new BufferedReader(new FileReader(fileName));
-        String line;
-        while ((line=reader.readLine())!=null){
-            line = line.trim();
-            if (line.isEmpty() || line.startsWith("#")){
-             continue;
+    /**
+     * вычисляет математическое выражение ???
+     */
+    private int evaluateExpression(String expression) {
+        String[] tokens = expression.split("\\s+");
+
+        int result = Integer.MIN_VALUE;
+        int sign = 1;
+
+        for (String token : tokens) {
+            token = token.trim();
+
+            if (token.equals("-")) {
+                sign = -1;
+            } else if (token.equals("+")) {
+                sign = 1;
+            } else {
+                int value;
+                if (token.startsWith("$")) {
+                    String variableName = token.substring(1);
+                    if (variables.containsKey(variableName)) {
+                        value = variables.get(variableName);
+                    } else {
+                        value = Integer.MIN_VALUE;
+                    }
+                } else {
+                    value = Integer.parseInt(token);
+                }
+
+                if (result == Integer.MIN_VALUE) {
+                    result = value;
+                } else {
+                    result = result + (sign * value);
+                }
             }
-            if (line.startsWith("set")){
-                processSetStatement(line);
-            } else if (line.startsWith("print")) {
-                processPrintStatement(line);
-            }else {
-                System.out.println("Некорректный оператор " + line);
-            }
-            reader.close();
         }
 
-
+        return result;
     }
+
+
 }
+
+
+
+
+
